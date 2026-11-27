@@ -1582,7 +1582,7 @@ mod host {
             };
             let x = (smooth_x * sens / 60.0).clamp(-1.0, 1.0);
             let dir = if invert { -1.0 } else { 1.0 };
-            let y = (smooth_y * sens / 60.0 * dir).clamp(-1.0, 1.0) * -1.0;
+            let y = -(smooth_y * sens / 60.0 * dir).clamp(-1.0, 1.0);
             if (dx != 0 || dy != 0)
                 && let Ok(mut last) = LAST_LOG.lock()
                 && last.is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
