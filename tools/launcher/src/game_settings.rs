@@ -606,8 +606,8 @@ mod tests {
     #[test]
     fn newest_settings_only_reads_a_storage_settings_folder() {
         let tmp = TempDir::new("find");
-        let wanted = tmp.write("7952987A/storage/settings/settings.xml", SAMPLE);
-        tmp.write("7952987A/storage/other/settings.xml", SAMPLE);
+        let wanted = tmp.write("profile-a/storage/settings/settings.xml", SAMPLE);
+        tmp.write("profile-a/storage/other/settings.xml", SAMPLE);
         tmp.write("settings.xml", SAMPLE);
 
         let found = newest_settings(&[tmp.path().to_path_buf()]);
