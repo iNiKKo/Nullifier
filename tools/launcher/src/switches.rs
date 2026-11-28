@@ -35,6 +35,9 @@ pub(crate) fn readable_value(key: &str, value: &str) -> String {
     if key.ends_with("_KB") {
         return format!("{value} KB");
     }
+    if key.ends_with("_MS") {
+        return format!("{value} ms");
+    }
     value.to_string()
 }
 
@@ -178,7 +181,17 @@ pub(crate) fn describe(key: &str) -> Option<Desc> {
         "VICTORY_TEXTURE_BUDGET_MB" => d(
             "Texture memory budget",
             "Texture data kept on the card. Higher looks sharper in motion; lower leaves room for other apps.",
-            "2048–4096 MB on a 16 GB card. Never more than your card's VRAM.",
+            "2048-4096 MB on a 16 GB card. Never more than your card's VRAM.",
+        ),
+        "VICTORY_TEXTURE_QUEUE_MB" => d(
+            "Texture bytes a frame may spend",
+            "Texture uploads in a frame are paced by a byte budget: a higher budget sends more at once, a lower one spreads them over frames.",
+            "128, 192 or 256 (MB). The default is 192.",
+        ),
+        "VICTORY_TEXTURE_QUEUE_MS" => d(
+            "Texture upload time a frame may spend",
+            "The same pacing measured in milliseconds per frame, for when the uploads need bounding by time rather than by bytes.",
+            "4, 8 or 16 (ms).",
         ),
         "VICTORY_CARD_BUFFERS_MB" => d(
             "World memory kept on the card",
