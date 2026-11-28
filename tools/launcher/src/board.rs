@@ -293,7 +293,11 @@ mod tests {
 
     #[test]
     fn a_shared_log_has_no_home_paths_addresses_or_mail() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/tester".into());
+        // The same lookup sanitize_log makes: HOME, then USERPROFILE on
+        // Windows, where HOME is often unset.
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| "/home/tester".into());
         let settings = Settings {
             game_dir: "/games/title".into(),
             ..Settings::default()
