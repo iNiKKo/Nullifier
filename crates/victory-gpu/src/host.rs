@@ -7304,7 +7304,7 @@ impl Meter {
         let Some(caption) = &self.caption else { return };
         // The fork's name and build, shown after the title's own caption.
         // Bumped by hand: this tree commits often and never cuts releases.
-        const BUILD: &str = "v0.011";
+        const BUILD: &str = "v0.012";
         let text = format!(
             " | Nullifier {BUILD} {fps:.0} fps {ms:.1} ms/frame {draws:.0} draws/frame"
         );

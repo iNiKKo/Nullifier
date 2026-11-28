@@ -39,7 +39,7 @@ const ACCENT: egui::Color32 = egui::Color32::from_rgb(77, 122, 235);
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The translation layer's build string. Kept beside `BUILD` in
 /// `crates/victory-gpu/src/host.rs` (bumped by hand there).
-const LAYER_VERSION: &str = "0.011";
+const LAYER_VERSION: &str = "0.012";
 
 fn apply_theme(ctx: &egui::Context) {
     use egui::{Color32, FontFamily, FontId, Stroke, TextStyle};
