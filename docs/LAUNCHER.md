@@ -78,7 +78,7 @@ cargo build --release --manifest-path tools/launcher/Cargo.toml
   `VICTORY_MOUSE_BUTTONS=0`. If it does nothing, the game log says why every
   five seconds (`mouse look idle` with the reason).
 * **Community** — each run records the **translation layer** version (the
-  title window's `v0.011` build string) and the launcher version separately;
+  title window's `v0.012` build string) and the launcher version separately;
   a nickname, **where** in the game the run was and **notes**
   (pop-in, flicker, HUD, crashes), then **Share last run**: it adds a local
   entry and copies a JSON block. Each entry keeps the Nullifier version, title
