@@ -23,13 +23,23 @@ pub(crate) struct GameSettings {
 }
 
 fn find_game_settings() -> Option<PathBuf> {
-    let roots = [
+    let roots: Vec<PathBuf> = [
         data_dir().map(|d| d.join("prefix/pfx/drive_c/users")),
         data_dir().map(|d| d.join("data")),
-    ];
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    newest_settings(&roots)
+}
+
+/// The newest `settings.xml` under `<root>/*/storage/settings`, if there is one.
+/// The title writes an `appdata0.rpf`-style container per profile, and the one
+/// it used last is the one whose settings it will read next.
+fn newest_settings(roots: &[PathBuf]) -> Option<PathBuf> {
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
-    for root in roots.into_iter().flatten() {
-        let mut stack = vec![(root, 0usize)];
+    for root in roots {
+        let mut stack = vec![(root.clone(), 0usize)];
         let mut seen = 0usize;
         while let Some((dir, depth)) = stack.pop() {
             if depth > 12 || seen > 40_000 {
@@ -65,6 +75,13 @@ fn find_game_settings() -> Option<PathBuf> {
 pub(crate) fn load_game_settings() -> Option<GameSettings> {
     let path = find_game_settings()?;
     let text = std::fs::read_to_string(&path).ok()?;
+    Some(parse(path, &text))
+}
+
+/// Reads the values out of the text of a `settings.xml`. Every element that
+/// carries a `value` attribute is a setting; its section is the chain of
+/// elements above it, without the root.
+fn parse(path: PathBuf, text: &str) -> GameSettings {
     let lines: Vec<String> = text.lines().map(str::to_string).collect();
     let mut settings = Vec::new();
     let mut stack: Vec<String> = Vec::new();
@@ -108,13 +125,13 @@ pub(crate) fn load_game_settings() -> Option<GameSettings> {
         }
     }
     let note = format!("{} settings from settings.xml", settings.len());
-    Some(GameSettings {
+    GameSettings {
         path,
         lines,
         settings,
         dirty: false,
         note,
-    })
+    }
 }
 
 fn attribute(line: &str, name: &str) -> Option<String> {
@@ -211,6 +228,27 @@ pub(crate) fn apply_game(game: &mut GameSettings) -> std::io::Result<()> {
     let mut text = game.lines.join("\n");
     text.push('\n');
     std::fs::write(&game.path, text)
+}
+
+/// One `--game-set NAME=VALUE`: find the setting it names and rewrite its line.
+/// `NAME` may be `section/key`, a bare key, or end in `/key`, as on the command
+/// line. Returns false when nothing matches, so the caller reports it and
+/// leaves the file alone.
+pub(crate) fn set(game: &mut GameSettings, name: &str, value: &str) -> bool {
+    let suffix = format!("/{name}");
+    let Some(setting) = game.settings.iter_mut().find(|s| {
+        let full = format!("{}/{}", s.section, s.key);
+        full == name || s.key == name || full.ends_with(&suffix)
+    }) else {
+        return false;
+    };
+    setting.value = value.to_string();
+    let line = format!(
+        "{}<{} value=\"{}\" />",
+        setting.indent, setting.key, setting.value
+    );
+    game.lines[setting.line] = line;
+    true
 }
 
 pub(crate) fn label_of(setting: &GameSetting) -> String {
@@ -391,4 +429,222 @@ pub(crate) fn no_effect(key: &str) -> bool {
             | "shadowAlphaTintedShadows"
             | "graphicsQualityPreset"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, SystemTime};
+
+    /// A settings.xml shaped like the title's: a root element, sections, a
+    /// self-closing setting, a paired one, and a comment that carries a
+    /// `value` attribute and must not become a setting.
+    const SAMPLE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<Settings>
+  <graphics>
+    <hdr value="true" />
+    <gamma value="25" />
+    <graphicsQualityPreset value="3" />
+  </graphics>
+  <video>
+    <resolutionFullscreen>
+      <width value="1920" />
+      <height value="1080" />
+    </resolutionFullscreen>
+    <vSync value="1" />
+  </video>
+  <!-- <gamma value="99" /> is only a comment -->
+  <audio>
+    <musicVolume value="0.8"></musicVolume>
+  </audio>
+</Settings>
+"#;
+
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "nullifier-settings-{}-{}-{tag}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::SeqCst)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+
+        fn write(&self, relative: &str, text: &str) -> PathBuf {
+            let path = self.0.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, text).unwrap();
+            path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn value_of<'a>(game: &'a GameSettings, section: &str, key: &str) -> &'a str {
+        game.settings
+            .iter()
+            .find(|s| s.section == section && s.key == key)
+            .unwrap_or_else(|| panic!("no {section}/{key}"))
+            .value
+            .as_str()
+    }
+
+    #[test]
+    fn parse_reads_sections_values_lines_and_indent() {
+        let game = parse(PathBuf::from("settings.xml"), SAMPLE);
+
+        assert_eq!(game.settings.len(), 7, "the comment is not a setting");
+        assert_eq!(value_of(&game, "graphics", "hdr"), "true");
+        assert_eq!(value_of(&game, "graphics", "gamma"), "25");
+        assert_eq!(
+            value_of(&game, "video/resolutionFullscreen", "width"),
+            "1920"
+        );
+        assert_eq!(
+            value_of(&game, "video/resolutionFullscreen", "height"),
+            "1080"
+        );
+        assert_eq!(value_of(&game, "video", "vSync"), "1");
+        assert_eq!(value_of(&game, "audio", "musicVolume"), "0.8");
+
+        let gamma = game
+            .settings
+            .iter()
+            .find(|s| s.key == "gamma")
+            .expect("gamma");
+        assert_eq!(gamma.line, 4, "the line the value is written back to");
+        assert_eq!(gamma.indent, "    ");
+        assert!(game.lines[gamma.line].trim_start().starts_with("<gamma "));
+
+        assert!(game.note.contains('7'), "{}", game.note);
+        assert!(!game.dirty);
+    }
+
+    #[test]
+    fn set_takes_a_section_key_a_bare_key_or_a_suffix() {
+        let mut game = parse(PathBuf::from("settings.xml"), SAMPLE);
+
+        assert!(set(&mut game, "graphics/gamma", "30"));
+        assert_eq!(value_of(&game, "graphics", "gamma"), "30");
+        assert!(game.lines[4].contains("value=\"30\""));
+
+        assert!(set(&mut game, "hdr", "false"));
+        assert_eq!(value_of(&game, "graphics", "hdr"), "false");
+
+        assert!(set(&mut game, "resolutionFullscreen/width", "2560"));
+        assert_eq!(
+            value_of(&game, "video/resolutionFullscreen", "width"),
+            "2560"
+        );
+
+        // The line keeps its indentation and the shape the writer expects.
+        assert_eq!(
+            game.lines[9], "      <width value=\"2560\" />",
+            "indent and self-closing form are preserved"
+        );
+    }
+
+    #[test]
+    fn set_unknown_key_reports_and_changes_nothing() {
+        let mut game = parse(PathBuf::from("settings.xml"), SAMPLE);
+        let before = game.lines.clone();
+
+        assert!(!set(&mut game, "noSuchSetting", "1"));
+        assert!(!set(&mut game, "graphics/noSuchSetting", "1"));
+        assert_eq!(game.lines, before);
+        assert_eq!(value_of(&game, "graphics", "gamma"), "25");
+    }
+
+    #[test]
+    fn apply_writes_the_changed_line_and_keeps_the_original_as_bak() {
+        let tmp = TempDir::new("apply");
+        let path = tmp.write("storage/settings/settings.xml", SAMPLE);
+        let mut game = parse(path.clone(), &std::fs::read_to_string(&path).unwrap());
+
+        assert!(set(&mut game, "graphics/gamma", "30"));
+        apply_game(&mut game).expect("apply");
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("    <gamma value=\"30\" />"));
+        assert!(after.contains("    <hdr value=\"true\" />"));
+        assert!(!after.contains("value=\"25\""));
+        assert!(after.ends_with('\n'));
+        assert_eq!(
+            after.lines().count(),
+            SAMPLE.lines().count(),
+            "no line is added or dropped"
+        );
+
+        let backup = path.with_file_name("settings.xml.bak");
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            SAMPLE,
+            "the backup is the file as it was"
+        );
+
+        // And what was written parses back to what was set.
+        let again = parse(path, &after);
+        assert_eq!(again.settings.len(), 7);
+        assert_eq!(value_of(&again, "graphics", "gamma"), "30");
+    }
+
+    #[test]
+    fn newest_settings_only_reads_a_storage_settings_folder() {
+        let tmp = TempDir::new("find");
+        let wanted = tmp.write("7952987A/storage/settings/settings.xml", SAMPLE);
+        tmp.write("7952987A/storage/other/settings.xml", SAMPLE);
+        tmp.write("settings.xml", SAMPLE);
+
+        let found = newest_settings(&[tmp.path().to_path_buf()]);
+        assert_eq!(found, Some(wanted));
+    }
+
+    #[test]
+    fn newest_settings_prefers_the_file_the_title_wrote_last() {
+        let tmp = TempDir::new("newest");
+        let older = tmp.write("a/storage/settings/settings.xml", SAMPLE);
+        let newer = tmp.write("b/storage/settings/settings.xml", SAMPLE);
+
+        let stamp = |path: &Path, secs: u64| {
+            let file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+            file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+                .unwrap();
+        };
+        stamp(&older, 1_000);
+        stamp(&newer, 2_000);
+
+        assert_eq!(
+            newest_settings(&[tmp.path().to_path_buf()]),
+            Some(newer.clone())
+        );
+
+        stamp(&older, 3_000);
+        assert_eq!(newest_settings(&[tmp.path().to_path_buf()]), Some(older));
+    }
+
+    #[test]
+    fn newest_settings_is_none_when_there_is_no_file() {
+        let tmp = TempDir::new("absent");
+        assert_eq!(newest_settings(&[tmp.path().to_path_buf()]), None);
+        assert_eq!(
+            newest_settings(&[tmp.path().join("missing").to_path_buf()]),
+            None
+        );
+        assert_eq!(newest_settings(&[]), None);
+    }
 }

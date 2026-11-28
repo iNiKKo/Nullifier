@@ -155,24 +155,11 @@ fn main() -> eframe::Result<()> {
         };
         let mut ok = true;
         for (name, value) in changes {
-            let found = game.settings.iter_mut().find(|s| {
-                let full = format!("{}/{}", s.section, s.key);
-                full == name || s.key == name || full.ends_with(&format!("/{name}"))
-            });
-            match found {
-                Some(setting) => {
-                    setting.value = value.clone();
-                    let line = format!(
-                        "{}<{} value=\"{}\" />",
-                        setting.indent, setting.key, setting.value
-                    );
-                    game.lines[setting.line] = line;
-                    println!("{name}={value}");
-                }
-                None => {
-                    eprintln!("no such setting: {name}");
-                    ok = false;
-                }
+            if game_settings::set(&mut game, &name, &value) {
+                println!("{name}={value}");
+            } else {
+                eprintln!("no such setting: {name}");
+                ok = false;
             }
         }
         if ok {
